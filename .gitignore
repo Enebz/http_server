@@ -1,0 +1,54 @@
+# Compiled Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Build directories
+build/
+dist/
+
+# Dependency directories
+deps/
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+.VSCodeCounter/
+*.sln
+*.swp
+*~
+
+# Generated documentation
+doc/
+
+# Generated files
+tags
+cscope*
+*.log
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore user-specific files
+*.user
+*.suo
+*.userprefs
+
+# Personal ignore
+notes.*
