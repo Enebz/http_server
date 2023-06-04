@@ -26,6 +26,7 @@ dist/
 deps/
 
 # Editor/IDE specific files
+.notes/
 .vscode/
 .idea/
 .VSCodeCounter/
@@ -52,3 +53,7 @@ Thumbs.db
 
 # Personal ignore
 notes.*
+
+# Test files
+test/
+client/
