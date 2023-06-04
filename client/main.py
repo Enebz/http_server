@@ -16,6 +16,8 @@ args = parser.parse_args()
 # The key is the name of the test and the value is the HTTP request
 test_requests = {
     "GET": b'GET / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
+    "GET1": b'GET /notfound HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
+    "GET2": b'GET /about HTTP/1.1\r\n\r\n',
     "POST": b'POST / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
     "PUT": b'PUT / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
     "DELETE": b'DELETE / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
@@ -32,7 +34,7 @@ test_requests = {
     "GET with no request line": b'Accept: text/html\r\nHost: localhost\r\nConnection: close\r\n\r\n',
     "GET with no request": b'',
     "WRONG_CRLF": b'GET / HTTP/1.1\nAccept: text/html\nHost: localhost\nConnection: close\n\n',
-    "POST_WITH_BODY": b'POST / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 5\r\n\r\nHello World',
+    "POST_WITH_BODY": b'POST / HTTP/1.1\r\nAccept: text/html\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 11\r\n\r\nHello World',
 }
 
 def send_request(client, request, delay=0.1, parts=4):

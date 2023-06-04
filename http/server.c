@@ -82,63 +82,91 @@ void http_server_destroy(HttpServer *server)
     free(server);
 }
 
-int http_recv_headers(HttpClient *client, short bufferSize, char **request_p)
+int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request)
 {
-    // Read incoming HTTP request
     char *buffer = (char*)malloc(bufferSize);
-    SSIZE_T request_len = 0;
-    SSIZE_T total_bytes_received = 0;
-    SSIZE_T bytes_recieved = 0;
 
-    do
+
+    char *header = (char*)malloc(1);
+    char *header_end = NULL;
+    int header_len;
+    SSIZE_T header_bytes_recieved = 0;
+    SSIZE_T total_header_bytes_recieved = 0;
+    
+
+    // Receive the headers
+    while (1)
     {
-        bytes_recieved = recv(client->socket, buffer, bufferSize, 0);   
-        if (bytes_recieved == 0)
+        // Receive the request
+        header_bytes_recieved = recv(client->socket, buffer, bufferSize, 0);
+        if (header_bytes_recieved == SOCKET_ERROR)
         {
-            // Client disconnected
-            printf("Client disconnected.\n");
+            printf("recv failed: %d", WSAGetLastError());
+            WSACleanup();
+            return 1;
+        }
 
-            // Free memory
-            free(buffer);
+        if (header_bytes_recieved == 0)
+        {
+            // The client has disconnected
+            printf("Client disconnected\n");
             return 2;
         }
 
-        if (bytes_recieved == SOCKET_ERROR)
+
+        header = (char*)realloc(header, total_header_bytes_recieved + header_bytes_recieved);
+        memcpy(header + total_header_bytes_recieved, buffer, header_bytes_recieved);
+
+        total_header_bytes_recieved += header_bytes_recieved;
+
+        if ((header_end = strstr(header, CRLFCRLF)) != NULL)
         {
-            printf("\nrecv failed with error code : %d\n", WSAGetLastError());
-
-            // Free memory
-            free(buffer);
-            return 1;
+            header_len = (int)(header_end - header) + 2;
+            
+            // Reallocation to remove the body
+            header = (char*)realloc(header, header_len + 1);
+            header[header_len] = '\0';
+            break;
         }
-        
-        request_len += bytes_recieved;
-
-        *request_p = (char*)realloc(*request_p, request_len); // +1 for null terminator
-        if (*request_p == NULL)
-        {
-            printf("\nrealloc failed with error code : %d\n", WSAGetLastError());
-            free(buffer);
-            return 1;
-        }
-
-        memccpy(*request_p + total_bytes_received, buffer, '\0', bytes_recieved);
-
-        total_bytes_received += bytes_recieved; 
-    // While the last 4 bytes of the request are not "\r\n\r\n"       
-    } while (strcmp(*request_p + total_bytes_received - 4, "\r\n\r\n") != 0);
-
-    // Add null terminator
-    *request_p = (char*)realloc(*request_p, request_len + 1);
-    (*request_p)[request_len] = '\0';
-
-    free(buffer);
+    }
+    
+    // Parse the headers
+    http_parse_headers(header, request);
     return 0;
 }
 
 int http_parse_headers(char *request, HttpRequest *http_request_p)
 {
-    // This function parses the HTTP headers and stores them in the http_request_p struct
+    // Get the method
+    char *method_end = strstr(request, " ");
+    int method_len = (int)(method_end - request);
+    char *method = (char*)malloc(method_len + 1); // +1 for the null terminator
+    memcpy(method, request, method_len);
+    method[method_len] = '\0';
+    http_request_p->method = str_to_http_method(method);
+    free(method);
+
+    // Get the url
+    char *url_start = method_end + 1;
+    char *url_end = strstr(url_start, " "); // +1 to skip the space after the method
+    int url_len = (int)(url_end - url_start);
+    char *url = (char*)malloc(url_len + 1); // +1 for the null terminator
+    memcpy(url, url_start, url_len);
+    url[url_len] = '\0';
+    http_request_p->url = url;
+    // Don't free the url because the pointer is what is stored in the request
+
+    // Get the version major and minor using sscanf
+    char *version_start = url_end + 1;
+    char *version_end = strstr(version_start, CRLF); // +1 to skip the space after the url
+    int version_len = (int)(version_end - version_start);
+    char *version = (char*)malloc(version_len + 1); // +1 for the null terminator
+    memcpy(version, version_start, version_len);
+    version[version_len] = '\0';
+    sscanf(version, "HTTP/%hi.%hi", &http_request_p->version.major, &http_request_p->version.minor);
+    free(version);
+
+    // Get the headers
     return 0;
 }
 
@@ -231,103 +259,136 @@ DWORD WINAPI http_handle_client(LPVOID lpParam)
     // After unpacking, free the args
     free(args);
 
-    // Build the request and response
-    HttpRequest *http_request = http_request_create(client, HTTP_INVALID, NULL, http_version(1, 1));
-    HttpResponse *http_response = http_response_create(NULL);
-
-    // Link request to response
-    http_response->request = http_request;
-
     // Log the thread
     log_message("TID%d\t\t| %s CONNECTED", client->thread_id, client->ip);
 
-    // Recieve HTTP request
-    char *request = malloc(1); // malloc 1 for http_recv_headers to be able to realloc
-    
-    if (http_recv_headers(client, server->buffer_size, &request) != 0)
-    {
-        printf("\nHTTP Request couldn't be read.\n");
-        log_message("TID%d\t\t| %s RECIEVED BAD HTTP", client->thread_id, client->ip);
-        log_message("TID%d\t\t| %s REQUEST FOLLOWS", client->thread_id, client->ip);
-        log_message("TID%d\t\t| %s", client->thread_id, request);
-
-        // Handle error
-        // TODO: Send 400 Bad Request
-        http_response_destroy(http_response);
-        free(request);
-        return 1;
-    }
-    log_message("TID%d\t\t| %s RECIEVED HTTP", client->thread_id, client->ip);
-
-    if (http_parse_headers(request, http_request) != 0)
-    {
-        printf("\nHTTP Request couldn't be parsed.\n");
-        log_message("TID%d\t\t| %s CANT PARSE HTTP", client->thread_id, client->ip);
-
-        // Handle error
-        // TODO: Send 400 Bad Request
-
-        http_request_destroy(http_request);
-        http_response_destroy(http_response);
-        free(request);
-        return 1;
-    }
-    log_message("TID%d\t\t| %s PARSED HTTP", client->thread_id, client->ip);
-
-    printf("parsed route\n");
-
-    http_request->method = HTTP_GET;
-    http_request->url = "/about";
-    http_request->version = http_version(1, 1);
-
-    printf("Getting route\n");
+    // Build the request and response
+    HttpRequest *http_request = http_request_create(client, HTTP_INVALID, NULL, http_version(1, 1));
+    HttpResponse *http_response = http_response_create(NULL);
+    http_response->request = http_request;
 
     // Handle the request
-    void *data1 = tree_get(server->method_routes[0], "/", http_route_search);
-    HttpRoute *route1 = (HttpRoute*)data1;
+    int handle_request_result = http_handle_request(server, client, http_request, http_response);
 
-    printf("Route: %s\n", route1->url);
-
-    printf("Method int: %d", (http_request->method));
-
-    void *data = tree_get(server->method_routes[http_request->method], http_request->url, http_route_search);
-
-    printf("Got route\n");
-
-    if (data == NULL)
+    if (handle_request_result != -1)
     {
-        // No route found (404 Not Found)
-        log_message("TID%d\t\t| %s REQUESTED URL NOT ROUTED", client->thread_id, client->ip);
-    }
-    log_message("TID%d\t\t| %s ROUTE FOUND", client->thread_id, client->ip);
-
-    // Route found, let handler fucntion do what's needed, and modify response as it will.
-    HttpRoute *route = (HttpRoute*)data;
-    int success = route->handler(http_request, http_response);
-    log_message("TID%d\t\t| %s HANDLED REQUEST", client->thread_id, client->ip);
-
-    printf("Handled with success: %d\n", success);
-
-    if (success != 0)
-    {
-        // Unhandled error (server error)
+        // Client disconnected
+        printf("Sending response\n");
+        http_send_response(client, http_response);  
     }
 
-    // Send the response
-    log_message("TID%d\t\t| %s BUILDING RESPONSE", client->thread_id, client->ip);
-    char *response = http_response_to_string(http_response);
-
-    log_message("TID%d\t\t| %s SENDING RESPONSE", client->thread_id, client->ip);
-    send(client->socket, response, strlen(response), 0);
-
-    log_message("TID%d\t\t| %s DISCONNECTING SOCKET", client->thread_id, client->ip);
+    // Cleanup
+    closesocket(client->socket);
+    server->client_count--;
+    server->clients[server->client_count] = NULL;
+    http_client_destroy(client);
 
     http_request_destroy(http_request);
     http_response_destroy(http_response);
-    free(request);
-    free(response);
+    log_message("TID%d\t\t| %s DISCONNECTED", client->thread_id, client->ip);
+    return 0;
+}
 
-    // Exit the thread
+int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *http_request, HttpResponse *http_response)
+{    
+    int recv_result = http_recv_request(client, server->buffer_size, http_request);
+
+    // Client disconnected
+    if (recv_result == 2)
+    {
+        return -1;
+    }
+
+    // Recv failed (500 Internal Server Error)
+    if (recv_result == 1)
+    {
+        http_response->status = http_status_code(500, "Internal Server Error");
+        log_message("TID%d\t\t| %s RECV FAILED", client->thread_id, client->ip);
+        return 1;
+    }
+
+    void *data = tree_get(server->method_routes[http_request->method], http_request->url, http_route_search);
+    
+    // Route not found (404 Not Found)
+    if (data == NULL)
+    {
+        http_response->status = http_status_code(404, "Not Found");
+        log_message("TID%d\t\t| %s REQUESTED URL NOT ROUTED", client->thread_id, client->ip);
+        return 1;
+    }
+
+    HttpRoute *route = (HttpRoute*)data;
+    int success = route->handler(http_request, http_response);
+
+    // If user set status code, use that
+    if (http_response->status.code != 0)
+    {
+        log_message("TID%d\t\t| %s USER SET STATUS CODE", client->thread_id, client->ip);
+        return 0;
+    }
+
+    // Handler returned fail (500 Internal Server Error)
+    if (success == 1)
+    {
+        http_response->status = http_status_code(500, "Internal Server Error");
+        log_message("TID%d\t\t| %s UNHANDLED ERROR", client->thread_id, client->ip);
+        return 1;
+    }
+
+    // Handler returned unimplemented (501 Not Implemented)
+    if (success == 2)
+    {
+        http_response->status = http_status_code(501, "Not Implemented");
+        log_message("TID%d\t\t| %s UNIMPLEMENTED", client->thread_id, client->ip);
+        return 1;
+    }
+
+    // Handler returned success (200 OK)
+    http_response->status = http_status_code(200, "OK");
+    log_message("TID%d\t\t| %s SUCCESS", client->thread_id, client->ip);
+    return 0;
+}
+
+int http_send_response(HttpClient *client, HttpResponse *response)
+{
+    // Before sending the response, set the default headers
+    ht_insert(response->headers, "Cache-Control", "no-cache");
+    ht_insert(response->headers, "Server", "EnebzHTTP");
+
+    // Response headers related to body (Content-Length, Content-Type, Last-Modified)
+    if (response->body != NULL)
+    {
+        // Content-Length
+        int n = strlen(response->body);
+        short content_length_digits = 0;
+        do {
+            n /= 10;
+            content_length_digits++;
+        } while (n > 0);
+
+        char content_length[content_length_digits + 1]; // +1 for null terminator
+        sprintf(content_length, "%lld", strlen(response->body));
+        content_length[content_length_digits] = '\0';
+        ht_insert(response->headers, "Content-Length", content_length);
+
+        // Content-Type
+        if (ht_get(response->headers, "Content-Type") == NULL)
+        {
+            ht_insert(response->headers, "Content-Type", "text/plain");
+        }
+    }
+
+    // Send the response
+    char *response_str = http_response_to_string(response);
+
+    printf("\n%s\n\n", response_str);
+    log_message("TID%d\t\t| %s SENT RESPONSE", client->thread_id, client->ip);
+
+    send(client->socket, response_str, strlen(response_str), 0);
+    log_message("TID%d\t\t| %s SENT RESPONSE", client->thread_id, client->ip);
+
+    // Free the response string
+    free(response_str);
     return 0;
 }
 

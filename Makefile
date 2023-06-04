@@ -2,6 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Werror
 LIBS = -lwsock32
 
+TARGET_DIR = bin
 SRCDIR = .
 OBJDIR = obj
 
@@ -29,6 +30,8 @@ SOURCES = $(SRCDIR)/main.c \
 # ./obj/./tree/tree.o
 OBJECTS = $(patsubst $(SRCDIR)/%.c, $(OBJDIR)/%.o, $(SOURCES))
 
+# This will create the target directory if it does not exist
+$(shell if not exist ${TARGET_DIR} mkdir $(TARGET_DIR))
 
 # This will create the object directory if it does not exist
 $(shell if not exist ${OBJDIR} mkdir $(OBJDIR))
@@ -54,7 +57,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 # This means, if any of the object files are newer than the target, the target will be rebuilt
 # The object files will be built because the rule above is used to build them and runs first
 # This will also run if the target does not exist
-$(TARGET): $(OBJECTS)
+$(TARGET_DIR)/$(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
 clean:

@@ -21,6 +21,10 @@
 #include "request.h"
 #include "response.h"
 
+#define CR '\r'
+#define LF '\n'
+#define CRLF "\r\n"
+#define CRLFCRLF "\r\n\r\n"
 
 typedef struct HttpServer HttpServer;
 typedef struct HttpClientHandlerArgs HttpClientHandlerArgs;
@@ -53,7 +57,9 @@ int checkSocketError(int socket, int error_code, char *message);
 HttpServer *http_server_create(int port, int backlog, int max_connections, int max_request_size, int buffer_size);
 void http_server_destroy(HttpServer *server);
 
-int http_recv_headers(HttpClient *client, short bufferSize, char **request_p);
+int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *http_request, HttpResponse *http_response);
+int http_send_response(HttpClient *client, HttpResponse *response);
+int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request);
 int http_parse_headers(char *request, HttpRequest *http_request_p);
 
 int http_server_listen(HttpServer* server);

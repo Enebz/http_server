@@ -66,8 +66,6 @@ int init_winsock()
 int get_index(HttpRequest *request, HttpResponse *response)
 {
 	printf("GET /\n");
-
-	response->status = http_status_code(200, "OK");
 	response->body = "This is index page!";
 	return 0;
 }
@@ -75,9 +73,15 @@ int get_index(HttpRequest *request, HttpResponse *response)
 int get_about(HttpRequest *request, HttpResponse *response)
 {
 	printf("GET /about\n");
-
-	response->status = http_status_code(200, "OK");
 	response->body = "This is about page!";
+	return 0;
+}
+
+int get_file(HttpRequest *request, HttpResponse *response)
+{
+	// This demonstrates how to read a file and send it as a response
+	printf("GET /file\n");
+	http_response_set_file(response, "file.html");
 	return 0;
 }
 
@@ -106,9 +110,11 @@ int main(int argc, char *argv[])
 	// Create routes
 	HttpRoute *index = http_route_create(HTTP_GET, "/", get_index);
 	HttpRoute *about = http_route_create(HTTP_GET, "/about", get_about);
+	HttpRoute *file = http_route_create(HTTP_GET, "/file", get_file);
 
 	http_route_serve(server, index);
 	http_route_serve(server, about);
+	http_route_serve(server, file);
 
 	// Start server
 	http_server_listen(server);

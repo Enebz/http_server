@@ -269,6 +269,11 @@ char** ht_keys(hashtable* ht)
 		}
 	}
 
+	if (keys_size == 0)
+	{
+		return NULL;
+	}
+
 	return keys;
 }
 
@@ -298,6 +303,11 @@ char** ht_values(hashtable* ht)
 
 			values[values_size - 1] = ptr->value;
 		}
+	}
+
+	if (values_size == 0)
+	{
+		return NULL;
 	}
 
 	return values;
