@@ -380,10 +380,6 @@ int http_send_response(HttpClient *client, HttpResponse *response)
 
     // Send the response
     char *response_str = http_response_to_string(response);
-
-    printf("\n%s\n\n", response_str);
-    log_message("TID%d\t\t| %s SENT RESPONSE", client->thread_id, client->ip);
-
     send(client->socket, response_str, strlen(response_str), 0);
     log_message("TID%d\t\t| %s SENT RESPONSE", client->thread_id, client->ip);
 

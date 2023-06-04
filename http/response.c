@@ -29,14 +29,20 @@ int http_response_set_file(HttpResponse *response, char* file_path)
 		fseek (f, 0, SEEK_END);
 		length = ftell (f);
 		fseek (f, 0, SEEK_SET);
-		buffer = malloc (length);
+		buffer = malloc (length + 1); // +1 for null terminator
 		if (buffer)
 		{
 			fread (buffer, 1, length, f);
 		}
 		fclose (f);
 	}
+    else 
+    {
+        return -1;
+    }
 
+    // Null terminate the buffer
+    buffer[length] = '\0';
     response->body = buffer;
 
     // Get mime type from file extension
