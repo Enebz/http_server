@@ -78,4 +78,7 @@ int     tree_balance_factor (tree *t);
 // Print tree in using parenthesis notation
 void    tree_print          (tree *t, void (*print_fn)(void*));
 
+// Iterate over a tree
+int     tree_iter           (tree *t, int (*iter_fn)(void*), tree_direction (*cmp_fn)(void*, void*));
+
 #endif // TREE_H

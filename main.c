@@ -118,6 +118,10 @@ int main(int argc, char *argv[])
 	HttpRoute *about = http_route_create(HTTP_GET, "/about", get_about);
 	HttpRoute *file = http_route_create(HTTP_GET, "/contact", get_contact);
 
+	http_route_limit(index, 3, 10);
+	http_route_limit(about, 10, 60);
+	http_route_limit(file, 10, 60);
+
 	http_route_serve(server, index);
 	http_route_serve(server, about);
 	http_route_serve(server, file);

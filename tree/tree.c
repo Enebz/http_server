@@ -342,3 +342,39 @@ void tree_print(tree *t, void (*print_fn)(void*))
     return;
 }
 
+// Iterate whole tree and apply function with each nodes data
+// -1 delete node and return -1
+// 0 = continue iteration
+// 1 = stop iteration and return 1
+int tree_iter(tree *t, int (*iter_fn)(void*), tree_direction (*cmp_fn)(void*, void*))
+{
+    if (t == NULL)
+    {
+        return 0;
+    }
+
+    int result = iter_fn(t->data);
+
+    if (result == -1)
+    {
+        tree_delete(t, t->data, cmp_fn);
+        return -1;
+    }
+
+    if (result == 1)
+    {
+        return 1;
+    }
+
+    if (tree_iter(t->left, iter_fn, cmp_fn) == 1)
+    {
+        return 1;
+    }
+
+    if (tree_iter(t->right, iter_fn, cmp_fn) == 1)
+    {
+        return 1;
+    }
+
+    return result;
+}

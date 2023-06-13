@@ -19,6 +19,7 @@ enum HttpMethod {
     HTTP_INVALID = -1,
 };
 
-enum HttpMethod str_to_http_method(char *str);
+enum HttpMethod string_to_http_method(char *str);
+char* http_method_to_string(HttpMethod method);
 
 #endif // HTTP_METHOD_H

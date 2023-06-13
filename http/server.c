@@ -1,6 +1,8 @@
 #include "server.h"
 #include "route.h"
 
+volatile int stop_rate_limit_worker = 0;
+
 int checkSocketError(int socket, int error_code, char *message)
 {
     if (socket == error_code)
@@ -10,6 +12,83 @@ int checkSocketError(int socket, int error_code, char *message)
         exit(1);
     }
     return 0;
+}
+
+// Define function for refilling tokens
+int http_refill_token_bucket(hashtable *ht, node *bucket, va_list args)
+{
+    int max_requests = va_arg(args, int);
+    int seconds = va_arg(args, int);
+
+    HttpTokenBucket *b = (HttpTokenBucket*)bucket->value;
+
+    EnterCriticalSection(b->cs);
+    unsigned long long now = GetMillisecondsSinceEpoch();
+    float seconds_since_refill = (now - b->last_update) / 1000.0;
+    float interval = (float)seconds / (float)max_requests;
+    int tokens_to_add = seconds_since_refill / interval;
+
+    // If the number of tokens to add is 0, just return
+    if (tokens_to_add == 0)
+    {
+        LeaveCriticalSection(b->cs);
+        return b->tokens;
+    }
+
+    b->tokens += tokens_to_add;
+
+    // If the number of tokens exceeds the max, delete the TokenBucket
+    if (b->tokens >= b->max_tokens)
+    {
+        ht_delete_node(ht, bucket);
+
+        LeaveCriticalSection(b->cs);
+        // We are not using -1 for this purpose because we want to delete the node inside the critical section.
+        // So, I just rewrote some of the code for the hashtable to pass the hashtable being iterated to the iteration function.
+        return 1;
+    }
+
+    b->last_update = now;
+    LeaveCriticalSection(b->cs);
+    return b->tokens;
+}
+
+
+int http_refill_token_buckets(void *v_route)
+{
+    HttpRoute *route = (HttpRoute*)v_route;
+
+    // If the route has no token buckets hash table, that means it has no rate limiting and should be skipped
+    if (route->token_buckets == NULL)
+    {
+        return 0;
+    }
+
+    // Iterates all the IP address buckets
+    EnterCriticalSection(route->cs);
+    ht_iter(route->token_buckets, http_refill_token_bucket, 2, route->max_requests, route->seconds);
+    LeaveCriticalSection(route->cs);
+    return 0;
+}
+
+DWORD WINAPI http_rate_limit_worker(LPVOID lpParam)
+{
+    // Cast the parameter to the correct type
+    HttpRateLimitWorkerArgs *args = (HttpRateLimitWorkerArgs*)lpParam;
+    HttpServer *server = args->server;
+
+    // After unpacking, free the args
+    http_rate_limit_worker_args_destroy(args);
+    while (1)
+    {
+        for (int i = 0; i < 9; i++)
+        {
+            tree* method_routes = server->method_routes[i];
+            
+            // Iterate over the routes
+            tree_iter(method_routes, http_refill_token_buckets, http_route_compare);
+        }
+    }    
 }
 
 // For HTTP Server
@@ -43,7 +122,7 @@ HttpServer *http_server_create(int port, int backlog, int max_connections, int m
     server->max_request_size = max_request_size;
     server->buffer_size = buffer_size;
     server->clients = (HttpClient**)malloc(sizeof(HttpClient*) * max_connections);
-    server->threads = (PHANDLE)malloc(sizeof(HANDLE) * max_connections);
+    server->client_threads = (PHANDLE)malloc(sizeof(HANDLE) * max_connections);
 
     // Create the method routes
     for (int i = 0; i < 9; i++)
@@ -76,7 +155,7 @@ void http_server_destroy(HttpServer *server)
     free(server->clients);
 
     // Free the threads
-    free(server->threads);
+    free(server->client_threads);
 
     // Free the server
     free(server);
@@ -143,7 +222,7 @@ int http_parse_headers(char *request, HttpRequest *http_request_p)
     char *method = (char*)malloc(method_len + 1); // +1 for the null terminator
     memcpy(method, request, method_len);
     method[method_len] = '\0';
-    http_request_p->method = str_to_http_method(method);
+    http_request_p->method = string_to_http_method(method);
     free(method);
 
     // Get the url
@@ -175,6 +254,19 @@ int http_server_listen(HttpServer* server)
     // Listen for incoming connections
     printf("Enebz HTTP running on port %d!\n", server->port);
     checkSocketError(listen(server->socket, 50), SOCKET_ERROR, "Listen failed");
+
+    // Start rate limiting thread
+    DWORD dwThreadId;
+
+    HttpRateLimitWorkerArgs *rate_limit_worker_args = http_rate_limit_worker_args_create(server);
+    server->rate_limit_worker = CreateThread(NULL, 0, http_rate_limit_worker, (LPVOID)rate_limit_worker_args, 0, &dwThreadId);
+
+    if (server->rate_limit_worker == NULL)
+    {
+        printf("Rate limit worker failed.\n");
+        http_rate_limit_worker_args_destroy(rate_limit_worker_args);
+        return 1;
+    }
 
     // Set the server to running
     server->running = 1;
@@ -208,8 +300,8 @@ int http_server_listen(HttpServer* server)
         client->socket = client_socket;        
 
         // Handle the client in a new thread
-        PHANDLE thread = &(server->threads[server->client_count]);
-        DWORD dwThreadId = rand();
+        PHANDLE thread = &(server->client_threads[server->client_count]);
+        DWORD dwThreadId;
 
         client->ip = inet_ntoa(client->address.sin_addr);
         client->thread_id = dwThreadId;
@@ -236,12 +328,15 @@ int http_server_listen(HttpServer* server)
     server->running = 0;
 
     // Wait for all threads to finish
-    WaitForMultipleObjects(server->client_count, server->threads, TRUE, INFINITE);
+    WaitForMultipleObjects(server->client_count, server->client_threads, TRUE, INFINITE);
+
+    // Wait for rate_limit_worker to finish
+    WaitForSingleObject(server->rate_limit_worker, INFINITE);
 
     // Close all the threads
     for (int i = 0; i < server->max_connections; i++)
     {
-        CloseHandle(server->threads[i]);
+        CloseHandle(server->client_threads[i]);
     }
 
     return 0;
@@ -257,10 +352,7 @@ DWORD WINAPI http_handle_client(LPVOID lpParam)
     HttpServer *server = args->server;
 
     // After unpacking, free the args
-    free(args);
-
-    // Log the thread
-    log_message("TID%d\t\t| %s CONNECTED", client->thread_id, client->ip);
+    http_client_handler_args_destroy(args);
 
     // Build the request and response
     HttpRequest *http_request = http_request_create(client, HTTP_INVALID, NULL, http_version(1, 1));
@@ -270,10 +362,9 @@ DWORD WINAPI http_handle_client(LPVOID lpParam)
     // Handle the request
     int handle_request_result = http_handle_request(server, client, http_request, http_response);
 
+    // Client did not disconnected
     if (handle_request_result != -1)
     {
-        // Client disconnected
-        printf("Sending response\n");
         http_send_response(client, http_response);  
     }
 
@@ -285,7 +376,6 @@ DWORD WINAPI http_handle_client(LPVOID lpParam)
 
     http_request_destroy(http_request);
     http_response_destroy(http_response);
-    log_message("TID%d\t\t| %s DISCONNECTED", client->thread_id, client->ip);
     return 0;
 }
 
@@ -303,7 +393,6 @@ int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *htt
     if (recv_result == 1)
     {
         http_response->status = http_status_code(500, "Internal Server Error");
-        log_message("TID%d\t\t| %s RECV FAILED", client->thread_id, client->ip);
         return 1;
     }
 
@@ -313,17 +402,45 @@ int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *htt
     if (data == NULL)
     {
         http_response->status = http_status_code(404, "Not Found");
-        log_message("TID%d\t\t| %s REQUESTED URL NOT ROUTED", client->thread_id, client->ip);
         return 1;
     }
 
     HttpRoute *route = (HttpRoute*)data;
+
+    // Ratelimiting    
+    EnterCriticalSection(route->cs);
+    HttpTokenBucket *bucket = ht_get(route->token_buckets, client->ip);
+    if (bucket == NULL)
+    {
+        bucket = http_token_bucket_create(route->max_requests, route->seconds);
+        ht_insert(route->token_buckets, client->ip, bucket);
+    }
+    LeaveCriticalSection(route->cs);
+
+
+    EnterCriticalSection(bucket->cs);
+    if (bucket->tokens <= 0)
+    {
+        http_response->status = http_status_code(429, "Too Many Requests");
+        if (http_response_set_file(http_response, "429.html") < 0)
+        {
+            return 2;
+        }
+        LeaveCriticalSection(bucket->cs);
+        return 1;
+    }
+    else 
+    {
+        bucket->tokens--;
+    }
+
+    LeaveCriticalSection(bucket->cs);
+
     int success = route->handler(http_request, http_response);
 
     // If user set status code, use that
     if (http_response->status.code != 0)
     {
-        log_message("TID%d\t\t| %s USER SET STATUS CODE", client->thread_id, client->ip);
         return 0;
     }
 
@@ -331,7 +448,6 @@ int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *htt
     if (success == 1)
     {
         http_response->status = http_status_code(500, "Internal Server Error");
-        log_message("TID%d\t\t| %s UNHANDLED ERROR", client->thread_id, client->ip);
         return 1;
     }
 
@@ -339,13 +455,11 @@ int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *htt
     if (success == 2)
     {
         http_response->status = http_status_code(501, "Not Implemented");
-        log_message("TID%d\t\t| %s UNIMPLEMENTED", client->thread_id, client->ip);
         return 1;
     }
 
     // Handler returned success (200 OK)
     http_response->status = http_status_code(200, "OK");
-    log_message("TID%d\t\t| %s SUCCESS", client->thread_id, client->ip);
     return 0;
 }
 
@@ -381,8 +495,16 @@ int http_send_response(HttpClient *client, HttpResponse *response)
     // Send the response
     char *response_str = http_response_to_string(response);
     send(client->socket, response_str, strlen(response_str), 0);
-    log_message("TID%d\t\t| %s SENT RESPONSE", client->thread_id, client->ip);
-
+    log_message(
+        "%-10s @%-10d *%-9s %-20s %-8s* -> %-3d %-10s",
+        client->ip,
+        client->thread_id,
+        http_method_to_string(response->request->method),
+        response->request->url,
+        http_version_to_string(response->request->version),
+        response->status.code,
+        response->status.reason
+    );
     // Free the response string
     free(response_str);
     return 0;
@@ -397,6 +519,18 @@ HttpClientHandlerArgs *http_client_handler_args_create(HttpClient *client, HttpS
 }
 
 void http_client_handler_args_destroy(HttpClientHandlerArgs *args)
+{
+    free(args);
+}
+
+HttpRateLimitWorkerArgs *http_rate_limit_worker_args_create(HttpServer *server)
+{
+    HttpRateLimitWorkerArgs *args = malloc(sizeof(HttpRateLimitWorkerArgs));
+    args->server = server;
+    return args;
+}
+
+void http_rate_limit_worker_args_destroy(HttpRateLimitWorkerArgs *args)
 {
     free(args);
 }

@@ -19,7 +19,8 @@ SOURCES = $(SRCDIR)/main.c \
 		$(SRCDIR)/http/route.c \
 		$(SRCDIR)/http/server.c \
 		$(SRCDIR)/http/status.c \
-		$(SRCDIR)/http/version.c
+		$(SRCDIR)/http/version.c \
+		$(SRCDIR)/http/tokenbucket.c \
 
 # This will take all source files and replace the .c with .o and put them in the object directory
 # So the object files will remain inside the object directory

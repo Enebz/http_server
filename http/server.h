@@ -20,6 +20,7 @@
 #include "client.h"
 #include "request.h"
 #include "response.h"
+#include "tokenbucket.h"
 
 #define CR '\r'
 #define LF '\n'
@@ -28,6 +29,7 @@
 
 typedef struct HttpServer HttpServer;
 typedef struct HttpClientHandlerArgs HttpClientHandlerArgs;
+typedef struct HttpRateLimitWorkerArgs HttpRateLimitWorkerArgs;
 
 struct HttpServer
 {
@@ -41,9 +43,10 @@ struct HttpServer
     int buffer_size;
     HttpClient **clients;
     int client_count;
-    HANDLE *threads;
+    HANDLE *client_threads;
+    HANDLE *rate_limit_worker;
     int running;
-    tree* method_routes[9];
+    tree* method_routes[9]; // One tree of routes per method
 };
 
 struct HttpClientHandlerArgs
@@ -51,6 +54,13 @@ struct HttpClientHandlerArgs
     HttpClient *client;
     HttpServer *server;
 };
+
+struct HttpRateLimitWorkerArgs
+{
+    HttpServer *server;
+};
+
+extern volatile int stop_rate_limit_worker;
 
 int checkSocketError(int socket, int error_code, char *message);
 
@@ -67,5 +77,8 @@ DWORD WINAPI http_handle_client(LPVOID lpParam);
 
 HttpClientHandlerArgs *http_client_handler_args_create(HttpClient *client, HttpServer *server);
 void http_client_handler_args_destroy(HttpClientHandlerArgs *args);
+
+HttpRateLimitWorkerArgs *http_rate_limit_worker_args_create(HttpServer *server);
+void http_rate_limit_worker_args_destroy(HttpRateLimitWorkerArgs *args);
 
 #endif // HTTP_SERVER_H

@@ -1,7 +1,7 @@
 #include "method.h"
 
 
-enum HttpMethod str_to_http_method(char *str)
+enum HttpMethod string_to_http_method(char *str)
 {
     static const struct {
         const char* methodString;
@@ -28,4 +28,31 @@ enum HttpMethod str_to_http_method(char *str)
 
     // Return an appropriate value for an unknown or unsupported method
     return HTTP_INVALID;
+}
+
+char* http_method_to_string(HttpMethod method)
+{
+    switch (method)
+    {
+    case HTTP_GET:
+        return "GET";
+    case HTTP_POST:
+        return "POST";
+    case HTTP_PUT:
+        return "PUT";
+    case HTTP_DELETE:
+        return "DELETE";
+    case HTTP_HEAD:
+        return "HEAD";
+    case HTTP_CONNECT:
+        return "CONNECT";
+    case HTTP_OPTIONS:
+        return "OPTIONS";
+    case HTTP_TRACE:
+        return "TRACE";
+    case HTTP_PATCH:
+        return "PATCH";
+    default:
+        return "INVALID";
+    }
 }

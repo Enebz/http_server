@@ -64,7 +64,7 @@ void ht_destroy(hashtable* ht)
 	free(ht);
 }
 
-int ht_insert(hashtable* ht, char* key, char* value)
+int ht_insert(hashtable* ht, char* key, void* value)
 {
 	unsigned long index = ht_hash(key) % ht->size;
 
@@ -98,7 +98,7 @@ int ht_insert(hashtable* ht, char* key, char* value)
 	return 0;
 }
 
-int ht_force_insert(hashtable* ht, char* key, char* value)
+int ht_force_insert(hashtable* ht, char* key, void* value)
 {
 	unsigned long index = ht_hash(key) % ht->size;
 
@@ -126,7 +126,7 @@ int ht_force_insert(hashtable* ht, char* key, char* value)
 	return 0;
 }
 
-int ht_update(hashtable* ht, char* key, char* value)
+int ht_update(hashtable* ht, char* key, void* value)
 {
 	unsigned long index = ht_hash(key) % ht->size;
 
@@ -175,6 +175,32 @@ int ht_delete(hashtable* ht, char* key)
 	return 0;
 }
 
+int ht_delete_node(hashtable *ht, node *node_to_delete)
+{
+	unsigned long index = ht_hash(node_to_delete->key) % ht->size;
+
+	node* left_node = node_to_delete->prev;
+	node* right_node = node_to_delete->next;
+
+	// If the node to delete's left is the head of the linked list
+	if (left_node == NULL)
+	{
+		// If right_node is NULL, that is fine, because then the bucket is empty
+		ht->container[index] = right_node;
+	} else {
+		left_node->next = right_node;
+	}
+
+	// If the node to delete's right is NULL
+	if (right_node != NULL)
+	{
+		right_node->prev = left_node;
+	}
+
+	free(node_to_delete);
+	return 0;
+}
+
 int ht_clear(hashtable* ht)
 {
 	node* tmp;
@@ -192,7 +218,7 @@ int ht_clear(hashtable* ht)
 	return 0;
 }
 
-char* ht_get(hashtable* ht, char* key)
+void* ht_get(hashtable* ht, char* key)
 {
 	node* node_found;
 
@@ -277,10 +303,10 @@ char** ht_keys(hashtable* ht)
 	return keys;
 }
 
-char** ht_values(hashtable* ht)
+void** ht_values(hashtable* ht)
 {
 	// We will not use ht_count() because it is O(n) and we want to avoid that
-	char** values = (char**)malloc(1);
+	void** values = (void**)malloc(1);
 
 	if (values == NULL)
 	{
@@ -294,7 +320,7 @@ char** ht_values(hashtable* ht)
 		for (node* ptr = ht->container[i]; ptr != NULL; ptr = ptr->next)
 		{
 			values_size++;
-			values = (char**)realloc(values, values_size * sizeof(char*));
+			values = (void**)realloc(values, values_size * sizeof(void*));
 
 			if (values == NULL)
 			{
@@ -328,22 +354,32 @@ ht_ssize_t ht_count(hashtable* ht)
 	return count;
 }
 
-void ht_print(hashtable* ht)
+int ht_iter(hashtable* ht, int (*func)(hashtable*, node*, va_list), int numArgs, ...)
 {
+	int res;
+	int did_delete = 0;
+
+	va_list args;
+    va_start(args, numArgs);
+
 	for (int i = 0; i < ht->size; i++)
 	{
-		ht_print_bucket(ht, i);
+		for (node* ptr = ht->container[i]; ptr != NULL; ptr = ptr->next)
+		{
+			res = func(ht, ptr, args);
+
+			if (res == -1)
+			{
+				ht_delete_node(ht, ptr);
+				did_delete = -1;
+			} else if (res == 1)
+			{
+				va_end(args);
+				return 1;
+			}
+		}
 	}
 
-	printf("\n");
-}
-
-void ht_print_bucket(hashtable* ht, unsigned long index)
-{
-	printf("%lu\t%p\t", index, ht->container[index]);
-	for (node* ptr = ht->container[index]; ptr != NULL; ptr = ptr->next)
-	{
-		printf("%s:%s - ", ptr->key, ptr->value);
-	}
-	printf("NULL\n");
+	va_end(args);
+	return did_delete;
 }

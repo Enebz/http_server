@@ -12,14 +12,35 @@ HttpRoute *http_route_create(HttpMethod method, char *url, int (*handler)(HttpRe
     route->url = url;
     route->handler = handler;
 
+    // Don't set token buckets yet as they are optional, so NULL means no rate limiting
+    route->token_buckets = NULL;
+
+    // Create critical section
+    route->cs = (LPCRITICAL_SECTION)malloc(sizeof(CRITICAL_SECTION));
+    InitializeCriticalSection(route->cs);
+
     // Return route
     return route;
 }
 
 void http_route_destroy(HttpRoute *route)
 {
+    // Destroy critical section
+    DeleteCriticalSection(route->cs);
+
     // Free route
     free(route);
+}
+
+int http_route_limit(HttpRoute *route, int max_requests, int seconds)
+{
+    // Set rate limits
+    route->max_requests = max_requests;
+    route->seconds = seconds;
+
+    // Create token buckets
+    route->token_buckets = ht_create(100);
+    return 0;
 }
 
 int http_route_serve(HttpServer *server, HttpRoute *route)
