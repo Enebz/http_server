@@ -17,6 +17,7 @@ struct HttpRequest
     char *url;
     HttpVersion version;
 
+    hashtable *query;
     hashtable *headers;
 
     char *body;

@@ -8,6 +8,7 @@ HttpRequest *http_request_create(HttpClient *client, HttpMethod method, char *ur
     request->method = method;
     request->url = url;
     request->version = version;
+    request->query = ht_create(10);
     request->headers = ht_create(30);
     request->body = NULL;
     return request;

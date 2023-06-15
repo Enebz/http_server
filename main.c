@@ -83,13 +83,40 @@ int get_about(HttpRequest *request, HttpResponse *response)
 
 int get_contact(HttpRequest *request, HttpResponse *response)
 {
-	// This demonstrates how to read a file and send it as a response
 	if (http_response_set_file(response, "contact.html") < 0)
 	{
 		return 2;
 	}
 	return 0;
 }
+
+int get_user(HttpRequest *request, HttpResponse *response)
+{
+	if (http_response_set_file(response, "user.html") < 0)
+	{
+		return 2;
+	}
+	return 0;
+}
+
+int get_style(HttpRequest *request, HttpResponse *response)
+{
+	if (http_response_set_file(response, "style.css") < 0)
+	{
+		return 2;
+	}
+	return 0;
+}
+
+int get_script(HttpRequest *request, HttpResponse *response)
+{
+	if (http_response_set_file(response, "user.js") < 0)
+	{
+		return 2;
+	}
+	return 0;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -117,14 +144,23 @@ int main(int argc, char *argv[])
 	HttpRoute *index = http_route_create(HTTP_GET, "/", get_index);
 	HttpRoute *about = http_route_create(HTTP_GET, "/about", get_about);
 	HttpRoute *file = http_route_create(HTTP_GET, "/contact", get_contact);
+	HttpRoute *user = http_route_create(HTTP_GET, "/user", get_user);
+	HttpRoute *style = http_route_create(HTTP_GET, "/style.css", get_style);
+	HttpRoute *script = http_route_create(HTTP_GET, "/user.js", get_script);
 
 	http_route_limit(index, 3, 10);
 	http_route_limit(about, 10, 60);
 	http_route_limit(file, 10, 60);
+	http_route_limit(user, 15, 30);
+	http_route_limit(style, 100, 60);
+	http_route_limit(script, 100, 60);
 
 	http_route_serve(server, index);
 	http_route_serve(server, about);
 	http_route_serve(server, file);
+	http_route_serve(server, user);
+	http_route_serve(server, style);
+	http_route_serve(server, script);
 
 	// Start server
 	http_server_listen(server);

@@ -200,9 +200,11 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
 
         if ((header_end = strstr(header, CRLFCRLF)) != NULL)
         {
-            header_len = (int)(header_end - header) + 2;
+            // header_end is now pointing to the first CR of the CRLFCRLF
+            // +3 for the LFCRLF
+            header_len = (int)(header_end - header) + 3;
             
-            // Reallocation to remove the body
+            // Reallocation to remove the body (+1 for the null terminator)
             header = (char*)realloc(header, header_len + 1);
             header[header_len] = '\0';
             break;
@@ -210,8 +212,7 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
     }
     
     // Parse the headers
-    http_parse_headers(header, request);
-    return 0;
+    return http_parse_headers(header, request);
 }
 
 int http_parse_headers(char *request, HttpRequest *http_request_p)
@@ -226,17 +227,75 @@ int http_parse_headers(char *request, HttpRequest *http_request_p)
     free(method);
 
     // Get the url
+    int has_query_params = 0;
     char *url_start = method_end + 1;
-    char *url_end = strstr(url_start, " "); // +1 to skip the space after the method
+
+    // Url might have query parameters
+    char *query_params_start = strstr(url_start, "?") + 1; // +1 to point to the character after the question mark
+    char *url_end = strstr(url_start, " ");
+
+    // If there is not space after the url, then the HTTP request is malformed
+    if (url_end == NULL)
+    {
+        return 1;
+    }
+
+    // If there is a question mark, then the url moight have query parameters
+    if (query_params_start != NULL)
+    {
+        // If the question mark is before the space, then there are query parameters
+        if (query_params_start < url_end)
+        {
+            url_end = query_params_start - 1; // -1 to point to the character before the question mark
+            has_query_params = 1;
+        }
+    }
+
     int url_len = (int)(url_end - url_start);
     char *url = (char*)malloc(url_len + 1); // +1 for the null terminator
     memcpy(url, url_start, url_len);
     url[url_len] = '\0';
     http_request_p->url = url;
-    // Don't free the url because the pointer is what is stored in the request
+
+    // Get the query parameters
+    char *query_params_end = strstr(url_end, "HTTP/") - 1; // -1 to point to the character before the H in HTTP
+
+    char *query_param_start = query_params_start;
+    if (has_query_params)
+    {
+        while (query_param_start != NULL && query_param_start < query_params_end)
+        {
+            char *query_param_end = strstr(query_param_start, "&");
+
+            if (query_param_end == NULL || query_param_end > query_params_end)
+            {
+                query_param_end = query_params_end;
+            }
+
+            char *query_param_key_start = query_param_start;
+            char *query_param_key_end = strstr(query_param_key_start, "=");
+            int query_param_key_len = (int)(query_param_key_end - query_param_key_start);
+            char *query_param_key = (char*)malloc(query_param_key_len + 1); // +1 for the null terminator
+            memcpy(query_param_key, query_param_key_start, query_param_key_len);
+            query_param_key[query_param_key_len] = '\0';
+
+            char *query_param_value_start = query_param_key_end + 1;
+            char *query_param_value_end = query_param_end;
+            int query_param_value_len = (int)(query_param_value_end - query_param_value_start);
+            char *query_param_value = (char*)malloc(query_param_value_len + 1); // +1 for the null terminator
+            memcpy(query_param_value, query_param_value_start, query_param_value_len);
+            query_param_value[query_param_value_len] = '\0';
+            
+            // Add the query parameter to the list
+            ht_insert(http_request_p->query, query_param_key, query_param_value);
+
+            // Go to next ampersand if there is one
+            query_param_start = query_param_value_end + 1; // +1 to skip the & or ?
+        }
+    }
 
     // Get the version major and minor using sscanf
-    char *version_start = url_end + 1;
+    char *version_start = query_params_end + 1;
     char *version_end = strstr(version_start, CRLF); // +1 to skip the space after the url
     int version_len = (int)(version_end - version_start);
     char *version = (char*)malloc(version_len + 1); // +1 for the null terminator

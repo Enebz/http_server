@@ -54,6 +54,7 @@ Thumbs.db
 
 # Personal ignore
 notes.*
+express-test/
 
 # Test files
 test/
