@@ -189,7 +189,7 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
         {
             // The client has disconnected
             printf("Client disconnected\n");
-            return 2;
+            return -1;
         }
 
 
@@ -201,8 +201,7 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
         if ((header_end = strstr(header, CRLFCRLF)) != NULL)
         {
             // header_end is now pointing to the first CR of the CRLFCRLF
-            // +3 for the LFCRLF
-            header_len = (int)(header_end - header) + 3;
+            header_len = (int)(header_end - header) + 4;
             
             // Reallocation to remove the body (+1 for the null terminator)
             header = (char*)realloc(header, header_len + 1);
@@ -210,6 +209,8 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
             break;
         }
     }
+
+    
     
     // Parse the headers
     return http_parse_headers(header, request);
@@ -217,50 +218,124 @@ int http_recv_request(HttpClient *client, short bufferSize, HttpRequest *request
 
 int http_parse_headers(char *request, HttpRequest *http_request_p)
 {
-    // Get the method
-    char *method_end = strstr(request, " ");
-    int method_len = (int)(method_end - request);
-    char *method = (char*)malloc(method_len + 1); // +1 for the null terminator
-    memcpy(method, request, method_len);
-    method[method_len] = '\0';
-    http_request_p->method = string_to_http_method(method);
-    free(method);
+    // REQUEST WRAPPER
+    char *request_end = strstr(request, CRLFCRLF);
 
-    // Get the url
-    int has_query_params = 0;
-    char *url_start = method_end + 1;
-
-    // Url might have query parameters
-    char *query_params_start = strstr(url_start, "?") + 1; // +1 to point to the character after the question mark
-    char *url_end = strstr(url_start, " ");
-
-    // If there is not space after the url, then the HTTP request is malformed
-    if (url_end == NULL)
+    if (request_end == NULL) // If there is no CRLFCRLF, then the request is malformed
     {
         return 1;
     }
 
-    // If there is a question mark, then the url moight have query parameters
-    if (query_params_start != NULL)
+
+    //// REQUEST LINE WRAPPER
+    // Get the request line end
+    char *request_line_start = request;
+    char *request_line_end = strstr(request_line_start, CRLF);
+
+    if (request_line_end == NULL) // If there is no CRLF after the request line start, then the request is malformed
     {
-        // If the question mark is before the space, then there are query parameters
-        if (query_params_start < url_end)
-        {
-            url_end = query_params_start - 1; // -1 to point to the character before the question mark
-            has_query_params = 1;
-        }
+        return 1;
+    }
+    else if (request_line_end > request_end) // If the CRLF appears after the whole request, then the request is malformed
+    {
+        return 1;
     }
 
-    int url_len = (int)(url_end - url_start);
-    char *url = (char*)malloc(url_len + 1); // +1 for the null terminator
-    memcpy(url, url_start, url_len);
-    url[url_len] = '\0';
-    http_request_p->url = url;
 
-    // Get the query parameters
-    char *query_params_end = strstr(url_end, "HTTP/") - 1; // -1 to point to the character before the H in HTTP
+    // Get the method
+    char *method_start = request_line_start;
+    char *method_end = strstr(method_start, " ");
 
-    char *query_param_start = query_params_start;
+    if (method_end == NULL) // If there is no space after the method, then the request is malformed
+    {
+        printf("method_end is null\n");
+        return 1;
+    }
+    else if (method_end > request_line_end) // The space appears after the request line, so the request is malformed
+    {
+        printf("method_end is beyond request_line_end\n");
+        return 1;
+    }
+
+
+    ////// URL WRAPPER
+    // Get the url
+    char *url_start = method_end + 1;
+    if (url_start >= request_line_end) // If the url start is at the end of the request line or beyond, then the request is malformed
+    {
+        printf("url_start is beyond request_line_end\n");
+        return 1;
+    }
+
+    char *url_end = strstr(url_start, "HTTP/");
+    if (url_end == NULL) // If there is no space after the url, then the request is malformed
+    {
+        printf("url_end is null\n");
+        return 1;
+    }
+    else if (url_end > request_line_end) // The space appears after the request line, so the request is malformed
+    {
+        printf("url_end is beyond request_line_end\n");
+        return 1;
+    }
+    url_end--; // To point at the space before the HTTP version
+
+
+    // Get the route
+    char *route_start = url_start;
+    char *route_end = url_end;
+
+
+    //////// QUERY PARAMS WRAPPER
+    int has_query_params = 0;
+
+
+    // Get the query params
+    char *query_params_start = strstr(route_start, "?");
+    char *query_params_end = url_end;
+    if (query_params_start != NULL)
+    {
+        if (query_params_start < url_end) // If the question mark is within the url, then the query params are present
+        {
+            has_query_params = 1;
+            route_end = query_params_start; // The route ends at the question mark
+        }
+    }
+    
+
+    // Get the version
+    char *version_start = url_end + 1;
+    char *version_end = request_line_end;
+    if (version_start > request_line_end)
+    {
+        printf("version_start is beyond request_line_end\n");
+        return 1;
+    }
+
+    
+    // Calculate lengths
+    int method_len = (int)(method_end - method_start);
+    int route_len = (int)(route_end - route_start);
+    int version_len = (int)(version_end - version_start);
+
+
+    // Assign the method
+    char *method = (char*)malloc(method_len + 1); // +1 for the null terminator
+    memcpy(method, request, method_len);
+    method[method_len] = '\0';
+    http_request_p->method = string_to_http_method(method);
+    free(method);  
+
+
+    // Assign the route
+    char *route = (char*)malloc(route_len + 1); // +1 for the null terminator
+    memcpy(route, route_start, route_len);
+    route[route_len] = '\0';
+    http_request_p->url = route;
+
+
+    // Assign the query parameters
+    char *query_param_start = query_params_start + 1; // +1 to skip the initial question mark
     if (has_query_params)
     {
         while (query_param_start != NULL && query_param_start < query_params_end)
@@ -309,10 +384,7 @@ int http_parse_headers(char *request, HttpRequest *http_request_p)
         }
     }
 
-    // Get the version major and minor using sscanf
-    char *version_start = query_params_end + 1;
-    char *version_end = strstr(version_start, CRLF); // +1 to skip the space after the url
-    int version_len = (int)(version_end - version_start);
+    // Assign the version major and minor using sscanf
     char *version = (char*)malloc(version_len + 1); // +1 for the null terminator
     memcpy(version, version_start, version_len);
     version[version_len] = '\0';
@@ -458,15 +530,21 @@ int http_handle_request(HttpServer *server, HttpClient *client, HttpRequest *htt
     int recv_result = http_recv_request(client, server->buffer_size, http_request);
 
     // Client disconnected
-    if (recv_result == 2)
+    if (recv_result == -1)
     {
         return -1;
     }
 
     // Recv failed (500 Internal Server Error)
-    if (recv_result == 1)
+    else if (recv_result == 1)
     {
         http_response->status = http_status_code(500, "Internal Server Error");
+        return 1;
+    }
+
+    // Parse failed, invalid request (400 Bad Request)
+    else if (recv_result == 2) {
+        http_response->status = http_status_code(400, "Bad Request");
         return 1;
     }
 

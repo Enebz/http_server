@@ -145,6 +145,8 @@ int main(int argc, char *argv[])
 	HttpRoute *about = http_route_create(HTTP_GET, "/about", get_about);
 	HttpRoute *file = http_route_create(HTTP_GET, "/contact", get_contact);
 	HttpRoute *user = http_route_create(HTTP_GET, "/user", get_user);
+
+	// Will soon be served as static files
 	HttpRoute *style = http_route_create(HTTP_GET, "/style.css", get_style);
 	HttpRoute *script = http_route_create(HTTP_GET, "/user.js", get_script);
 
@@ -161,6 +163,10 @@ int main(int argc, char *argv[])
 	http_route_serve(server, user);
 	http_route_serve(server, style);
 	http_route_serve(server, script);
+
+	// Serve static files
+	// TODO: Implement this
+	// http_serve_static(server, "/static", "static");
 
 	// Start server
 	http_server_listen(server);
