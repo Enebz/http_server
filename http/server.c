@@ -274,10 +274,25 @@ int http_parse_headers(char *request, HttpRequest *http_request_p)
 
             char *query_param_key_start = query_param_start;
             char *query_param_key_end = strstr(query_param_key_start, "=");
+
+            // A corresponding = for the & was not found so the query parameter is malformed, then return
+            if (query_param_key_end == NULL || query_param_key_end > query_param_end)
+            {
+                break;
+            }
+
             int query_param_key_len = (int)(query_param_key_end - query_param_key_start);
+
+            // A key was not found so the query parameter is malformed, then return
+            if (query_param_key_len == 0)
+            {
+                break;
+            }
+
             char *query_param_key = (char*)malloc(query_param_key_len + 1); // +1 for the null terminator
             memcpy(query_param_key, query_param_key_start, query_param_key_len);
             query_param_key[query_param_key_len] = '\0';
+
 
             char *query_param_value_start = query_param_key_end + 1;
             char *query_param_value_end = query_param_end;
@@ -287,7 +302,7 @@ int http_parse_headers(char *request, HttpRequest *http_request_p)
             query_param_value[query_param_value_len] = '\0';
             
             // Add the query parameter to the list
-            ht_insert(http_request_p->query, query_param_key, query_param_value);
+            ht_update(http_request_p->query, query_param_key, query_param_value);
 
             // Go to next ampersand if there is one
             query_param_start = query_param_value_end + 1; // +1 to skip the & or ?
