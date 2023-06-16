@@ -1,4 +1,4 @@
-# http_server
+# EnebzHTTP
 EnebzHTTP is a simple HTTP server written in C.
 
 At the moment, it supports GET requests with HTTP/1.1 protocol.
